@@ -1,242 +1,207 @@
 import streamlit as st
 import pandas as pd 
-import matplotlib.pyplot as plt 
+import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
 
-# Configuraciön basica de la pagina
+
+# Configuración básica de la pagina
 st.set_page_config(layout='wide', initial_sidebar_state='expanded')
-# Configuraciön simple para los graficos
+# Configuración simple para los gráficos
 sns.set_style("whitegrid")
+
+# Carga de datos:
 
 @st.cache_data
 def cargar_datos():
-    # Carga el archivo CSV con datos macrceconomicos
-    df = pd.read_csv("USMacroG_v2.csv")
-    # Usamos solo el ano como referenda temporal
-    df["Fecha"] = df["Year"]
+    # Carga el archivo CSV con datos macrceconómicos
+    df = pd.read_csv("data.csv")
+    df['Date'] = pd.to_datetime(df['Date'], format='%m/%d/%Y')
     return df
 
 df= cargar_datos()
 
+# Barra dashboard
+
 st.sidebar.header('Filtros del Dashboard')
 
-## Selector de rango de anos
-anio_inicio, anio_fin = st.sidebar.slider(
-'Rango de Anos',
-int(df [ 'Year' ] .min()),
-int(df [ 'Year' ] .max()),
-(1950, 2000)
-)
-# Selector de componentes del PIB (solo para el grâfico de area)
-componentes_pib = st.sidebar.multiselect('Componentes del PIB',
-                                         options=["consumption","invest","government"],
-                                         default=["consumption", "invest"],
-                                         help="Selecciona los componentes para visualizar en el grafico de area")
+# Extraer nombre y número de mes
+df['mes_nombre'] = df['Date'].dt.strftime('%B')
+df['mes_num'] = df['Date'].dt.month
 
-# Filtramos los datos segün el rango de anos seleccionado
-df_filtrado = df[(df["Year"] >= anio_inicio) & (df["Year"] <= anio_fin)]
+# Crear lista de meses con opción "Todos"
+meses_unicos = df[['mes_nombre', 'mes_num']].drop_duplicates().sort_values('mes_num')
+lista_meses = ["Todos"] + meses_unicos['mes_nombre'].tolist()
+
+# Mostrar selectbox en la barra lateral
+mes_seleccionado = st.sidebar.selectbox("Selecciona un mes:", lista_meses)
+
+# Filtrar por mes si no es "Todos"
+if mes_seleccionado != "Todos":
+    mes_num_seleccionado = meses_unicos[meses_unicos['mes_nombre'] == mes_seleccionado]['mes_num'].values[0]
+    df_mes = df[df['Date'].dt.month == mes_num_seleccionado]
+else:
+    df_mes = df.copy()
+
+# Obtener rango de fechas (filtrado por mes)
+min_date = df_mes['Date'].min().to_pydatetime()
+max_date = df_mes['Date'].max().to_pydatetime()
+
+# Slider de fechas según ese rango
+ini_date, fin_date = st.sidebar.slider(
+    "Selecciona un rango de fechas:",
+    min_value=min_date,
+    max_value=max_date,
+    value=(min_date, max_date),
+    format="MM/DD/YYYY"
+)
+
+# Filtro final
+df_filtrado = df_mes[(df_mes['Date'] >= ini_date) & (df_mes['Date'] <= fin_date)]
+
+# Filtro de línea de productos
+lineas_producto = df_filtrado['Product line'].unique()
+lineas_seleccionadas = st.sidebar.multiselect(
+    "Selecciona las líneas de productos:",
+    options=lineas_producto,
+    default=lineas_producto  # por defecto seleccionamos todas las líneas
+)
+
+# Filtrar por líneas de producto seleccionadas
+df_filtrado = df_filtrado[df_filtrado['Product line'].isin(lineas_seleccionadas)]
 
 # título principal dashboard
-st.title(' 📊 Dashboard Macroeconómico')
-st.write(f"Datos económicos de EE.UU. ( {anio_inicio} -{anio_fin})")
-
-st.subheader("Ültimo trimestre registrado")
-
-# Obtenemos los datos del Ultimo trimestre
-ultimo = df_filtrado.iloc[-1]
-fecha_ultimo = f"Q{int(ultimo ['Quarter'])} {int(ultimo ['Year'])}"
-# Creamos tres columnas para las métricas principales
-col1, col2, col3 = st.columns(3)
-# Mostramos las métricas con formato adecuado
-col1.metric("PIB (GDP)", f"${ultimo['gdp']:,.0f} B", help=f"Producto Interno Bruto en {fecha_ultimo}(")
-col2.metric("Desempleo", f"{ultimo['unemp']:.1f}%",help=f"Tasa de desempleo en {fecha_ultimo}")
-col3.metric("Inflacion", f"{ultimo ['inflation'] :.1f}%", help=f"Tasa de inflación en {fecha_ultimo}")
-
-# sección de gráficos segunda fila
-
-# Secciön: Composición del PIB
-st.subheader('Composición del PIB')
-
-# Dividimos la pantalla en dos columnas (proporcion 7:3)
-c1_f1, c2_f1 = st.columns((7, 3))
-
-# Columns 1: Gráfico de área para componentes del PIB
-
-with c1_f1:
-    if componentes_pib:
-        # Creamos un gráfico de área para mostrar la evolución temporal
-        fig, ax = plt.subplots(figsize=(10, 4))
-        # Graficamos los componentes seleccionados
-        # Agrupamos por año para simplificar
-        df_anual = df_filtrado.groupby('Year')[componentes_pib].mean()
-        df_anual.plot.area(
-            ax=ax,
-            alpha=0.8,  # Transparencia
-            cmap='viridis'  # Esquema de colores
-        )
-        # Etiquetas y cuadrícula
-        ax.set_ylabel("Billones $")
-        ax.set_title("Evolución de componentes del PIB")
-        ax.grid(True, alpha=0.3)
-        # Mostramos el gráfico en Streamlit
-        st.pyplot(fig)
-    else:
-        st.info("Selecciona al menos un componente del PIB")
-
-# Columna 2: Gráfico de torta para distribucion trimestral
-
-with c2_f1:
-    if componentes_pib:
-        # Calculamos el promedio por trimestre
-        pie_data = df_filtrado.groupby("Quarter")[componentes_pib].mean().sum(axis=1)
-        # Creamos el gráfico de torta
-        fig, ax = plt.subplots(figsize=(5, 4))
-        ax.pie(
-            pie_data,
-            labels=[f"Trim {int(q)}" for q in pie_data.index],
-            autopct="%1.1f%%",  # Mostrar porcentajes
-            colors=sns.color_palette("viridis", 4)	# Usar misma paleta que gráfico de área
-        )
-        # Titulo del grafico
-        ax.set_title("Distribución por trimestre")
-        # Mostramos el gráfico en Streamlit
-        st.pyplot(fig)
-    else:
-        st.info("Selecciona al menos un componente del PIB")
+st.title(' 📊 Dashboard de Ventas')
+st.write(f"Datos de ventas de una tienda de conveniencia. ( {ini_date.strftime('%d/%m/%y')} -{fin_date.strftime('%d/%m/%y')})")
 
 
-# sección de análisis económico (tercera fila)
+st.subheader("Análisis requeridos")
 
-# Sección: Análisis de Tendencias Económicas
-st.subheader("Análisis Económico")
-st.write("Visualización de tendencias y relaciones entre indicadores económicos")
+# Opciones de visualización
 
-# Creamos una fila con dos gráficos: PIB y Variables Porcentuales
-c1_f2, c2_f2 = st.columns(2)
+grafico_opcion = st.radio(
+    "Selecciona gráfico a mostrar:",
+    ["Ventas Totales por Día",
+     "Ingresos por Línea de Producto",
+     "Distribución de la Calificación de Clientes",
+     "Análisis de Correlación Numérica",
+     "Composición del Ingreso Bruto por Sucursal y Línea de Producto"]
+)
 
-# Diccionario para traducir nombres de variables
+if grafico_opcion == "Ventas Totales por Día":
+    st.subheader("Evolución de las Ventas Totales")
+    st.write("*Se muestra cómo han variado las ventas totales a lo largo del tiempo.*")
 
-nombres = {
-"gdp": "PIB",
-"unemp": "Desempleo",
-"inflation": "Inflación"
-}
+    # agrupamos ingreso por fecha y agregamos días consecutivos para el gráfico
+    df_ventas = df_filtrado.groupby("Date")["Total"].sum().reset_index()
+    df_ventas['Día'] = np.arange(1, len(df_ventas) + 1)
 
-with c1_f2:
-    st.write("### Evolución del PIB")
     fig, ax = plt.subplots(figsize=(6, 3))
+    sns.lineplot(data=df_ventas, x="Día", y="Total", color="#1f77b4", ax=ax)
 
-    # Graficamos el PIB agrupado por año
-    df_anual_pib= df_filtrado.groupby("Year")["gdp"].mean().reset_index()
-    sns.lineplot(
-    data= df_anual_pib,
-    x="Year",
-    y="gdp",
-    color="#1f77b4",
-    ax= ax
-    )
-
-    # Configuración del gráfico
-    ax.set_ylabel("Billones $")
-    ax.set_title("Tendencia del Producto Interno Bruto")
+    ax.set_ylabel("Ventas $")
+    ax.set_title("Tendencia de las ventas diarias")
     ax.grid(True, alpha=0.3)
 
-    # Mostramos el gráfico
     st.pyplot(fig)
-    st.write("*El gráfico muestra la evolución del PIB a lo largo del tiempo, permitiendo identificar ciclos económicos y tendencias de crecimiento.*")
 
-    # Columna 2: Gráfico para variables porcentuales (Desemplec e Inflación)
-with c2_f2:
-    st.write("### Desempleo e Inflacion")
-    fig, ax = plt.subplots(figsize=(6, 3))
-    # Colores para cada variable
-    colores = {"unemp": "#ff7f0e", "inflation": "#2ca02c"}
+elif grafico_opcion == "Ingresos por Línea de Producto":
+    # Agrupar datos por línea de producto
+    df_ventas_br = df_filtrado.groupby("Product line")["Total"].sum().reset_index()
 
-    # Graficamos las variables porcentuales agrupadas par año
-    df_anual_vars = df_filtrado.groupby("Year")[["unemp", "inflation"]].mean().reset_index()
-    for var in ["unemp", "inflation"]:
-        sns.lineplot(
-            data=df_anual_vars,
-            x="Year",
-            y=var,
-            label=nombres.get(var),
-            color=colores.get(var),
-            ax=ax
-        )
+    # Crear diccionario de letras
+    etiquetas_letras = {nombre: chr(65 + i) for i, nombre in enumerate(df_ventas_br["Product line"])}
+    df_ventas_br["Etiqueta"] = df_ventas_br["Product line"].map(etiquetas_letras)
+
+    fig, ax = plt.subplots(figsize=(8, 4))
+
+    # Graficar
+    sns.barplot(data=df_ventas_br, x="Etiqueta", y="Total", ax=ax, color="#4c72b0", label="Ingreso Total")
 
     # Configuración del gráfico
-    ax.set_ylabel("Porcentaje (%)")
-    ax.set_title("Tendencias de Desempleo e Inflación")
-    ax.legend()
-    ax.grid(True, alpha=0.3)
+    ax.legend(title="Leyenda")
+    ax.set_xlabel("Línea de Producto (codificada)")
+    ax.set_ylabel("Total de Ingresos")
+    ax.set_title("Ingresos por Línea de Producto")
 
-    # Mostramos el gráfico
     st.pyplot(fig)
-    st.write("*Comparación entre tasas de desempleo e inflación, útil para analizar posibles compensaciones en políticas económicas.*")
 
-# sección de análisis de relaciones (cuarta fila):
+    # Mostrar tabla de equivalencias (sin nombres de producto, solo letras)
+    st.write("**Equivalencias de Línea de Producto:**")
+    st.table(pd.DataFrame.from_dict(etiquetas_letras, orient='index', columns=["Letra"]).reset_index().rename(columns={"index": "Product Line"}))
 
-# Nueva fila: Gráfico de dispersión (Inflación vs Desempleo) e Histograma
-c1_f3, c2_f3 = st.columns(2)
+elif grafico_opcion == "Distribución de la Calificación de Clientes":
+    st.subheader("Distribución de la Calificación de Clientes")
+    st.write("*Este histograma muestra cómo se distribuyen las calificaciones otorgadas por los clientes.*")
 
-# Gráfico de dispersión: Desempleo vs Inflación (Curva de Phillips)
-with c1_f3:
-    st.write("### Relación Inflación-Desempleo")
-    fig, ax =plt.subplots(figsize=(6, 3))
-
-    # Crear gráfico de dispersión
-    scatter = ax.scatter(
-        df_filtrado["unemp"],	\
-        df_filtrado ["inflation"],
-        alpha=0.7,
-        c= df_filtrado ["Year"] ,	# Colorear por año
-        cmap="viridis"
-    )
-
-    # Añadir línea de tendencia
-    # z = np.polyfit(df_filtrado["unemp"], df_filtrado["inflation"],1)
-    # p = np.poly1d(z)
-    # ax.plot(df_filtrado["unemp"], p(df_filtrado["unemp"]), "r--", alpha=0.7)
-
-    # Configuración del gráfico
-    ax.set_xlabel("Tasa de Desempleo (%)")
-    ax.set_ylabel("Tasa de Inflación (%)")
-    ax.set_title("Curva de Phillips: Inflación vs Desempleo")
-    ax.grid(True, alpha=0.3)
-
-    # Mostrar gráfico
-    st.pyplot(fig)
-    st.write("*Explora la relación entre inflación y desempleo. La teoría de la Curva de Phillips sugiere una relación inversa entre ambas variables.*")
-
-# Histograma de Inflación
-with c2_f3:
-    st.write("### Distribución de la Inflación")
     fig, ax = plt.subplots(figsize=(6, 3))
 
-    # Crear histograma
-    ax.hist(
-        df_filtrado["inflation"],
-        bins=15,
+    sns.histplot(
+        data=df_filtrado,
+        x="Rating",
+        bins=10,
+        kde=True,
         color="#2ca02c",
-        alpha=0.7,
-        edgecolor="black"
+        edgecolor="black",
+        ax=ax
     )
-    # Configuración del gráfico
-    ax.set_xlabel("Tasa de Inflación (%)")
+
+    ax.set_xlabel("Calificación")
     ax.set_ylabel("Frecuencia")
-    ax.set_title("Distribución de la Inflación")
+    ax.set_title("Distribución de Calificaciones de Clientes")
     ax.grid(True, alpha=0.3)
 
-    # Mostrar línea vertical en la media
-    media = df_filtrado["inflation"].mean()
-    ax.axvline(media, color="red", linestyle="dashed", linewidth=1, label=f"Media: {media:.2f}%")
-    ax.legend()
-
-    # Mostrar gráfico
     st.pyplot(fig)
-    st.write("*Visualiza la distribución de las tasas de inflación en el período seleccionado, mostrando su frecuencia y dispersión.*")
 
-# Pie de página simple
-st.markdown("---")
-st.caption("Dashboard Macroeconómico Simple | Datos: USMacroG_v2.csv")
+elif grafico_opcion == "Análisis de Correlación Numérica":
+    st.subheader("Análisis de Correlación Numérica")
+    st.write(
+        "*Se utiliza un mapa de calor para visualizar las correlaciones lineales entre variables numéricas. "
+        "Como se puede visualizar, es más intuitiva para sacar conclusiones.*"
+    )
+
+    variables_numericas = ['Unit price', 'Quantity', 'Tax 5%', 'Total', 'cogs', 'gross income', 'Rating']
+    corr_matrix = df_filtrado[variables_numericas].corr(method='pearson')
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+    sns.heatmap(corr_matrix, annot=True, fmt=".2f", cmap="coolwarm", center=0, linewidths=0.5, ax=ax)
+    ax.set_title("Matriz de Correlación")
+
+    st.pyplot(fig)
+
+
+elif grafico_opcion == "Composición del Ingreso Bruto por Sucursal y Línea de Producto":
+
+    st.subheader("Composición del Ingreso Bruto por Sucursal y Línea de Producto")
+    st.write(
+        "*Se muestra cómo se distribuye el ingreso bruto por línea de producto dentro de cada sucursal. "
+        "La altura de cada barra representa el ingreso total por sucursal, y los colores representan las líneas de producto.*"
+    )
+
+
+    df_composicion = df_filtrado.groupby(['Branch', 'Product line'])['gross income'].sum().reset_index()
+
+
+    df_pivot = df_composicion.pivot(index='Branch', columns='Product line', values='gross income').fillna(0)
+
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+    df_pivot.plot(kind='bar', stacked=True, ax=ax, colormap='tab20')
+
+
+    ax.set_title("Composición del Ingreso Bruto por Sucursal y Línea de Producto")
+    ax.set_xlabel("Sucursal")
+    ax.set_ylabel("Ingreso Bruto ($)")
+    ax.legend(title="Línea de Producto", bbox_to_anchor=(1.05, 1), loc='upper left')
+    plt.xticks(rotation=0)
+
+    st.pyplot(fig)
+
+
+    df_porcentajes = df_pivot.div(df_pivot.sum(axis=1), axis=0) * 100
+    df_porcentajes = df_porcentajes.round(1)  # redondear
+
+
+    st.write("### Porcentajes de Ingreso Bruto por Línea de Producto dentro de cada Sucursal (%)")
+    st.dataframe(df_porcentajes)
+
