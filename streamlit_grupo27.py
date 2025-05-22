@@ -1,9 +1,9 @@
 import streamlit as st
-import pandas as pd 
+import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
-
+import plotly.express as px
 
 # Configuración básica de la pagina
 st.set_page_config(layout='wide', initial_sidebar_state='expanded')
@@ -75,7 +75,7 @@ st.title(' 📊 Dashboard de Ventas')
 st.write(f"Datos de ventas de una tienda de conveniencia. ( {ini_date.strftime('%d/%m/%y')} -{fin_date.strftime('%d/%m/%y')})")
 
 
-st.subheader("Análisis requeridos")
+st.subheader("Análisis de datos")
 
 # Opciones de visualización
 
@@ -84,67 +84,70 @@ grafico_opcion = st.radio(
     ["Ventas Totales por Día",
      "Ingresos por Línea de Producto",
      "Distribución de la Calificación de Clientes",
+     "Comparación del Gasto por Tipo de Cliente",
+     "Relación entre Costo y Ganancia Bruta",
+     "Métodos de Pago Preferidos",
      "Análisis de Correlación Numérica",
-     "Composición del Ingreso Bruto por Sucursal y Línea de Producto"]
+     "Composición del Ingreso Bruto por Sucursal y Línea de Producto",
+     "Relación entre Total Gastado, Cantidad Comprada y Calificación del Cliente (3D)"
+     ]
 )
 
 if grafico_opcion == "Ventas Totales por Día":
-    st.subheader("Evolución de las Ventas Totales")
-    st.write("*Se muestra cómo han variado las ventas totales a lo largo del tiempo.*")
+    if lineas_seleccionadas:
+        # Aquí agrupamos por fecha
+        df_ventas = df_filtrado.groupby('Date')['Total'].sum().reset_index(name='Total de Ventas')
 
-    # agrupamos ingreso por fecha y agregamos días consecutivos para el gráfico
-    df_ventas = df_filtrado.groupby("Date")["Total"].sum().reset_index()
-    df_ventas['Día'] = np.arange(1, len(df_ventas) + 1)
+        # Creamos un gráfico de área para mostrar la evolución temporal
+        fig, ax = plt.subplots(figsize=(12, 4))
 
-    fig, ax = plt.subplots(figsize=(6, 3))
-    sns.lineplot(data=df_ventas, x="Día", y="Total", color="#1f77b4", ax=ax)
+        sns.lineplot(data = df_ventas, x = "Date", y = "Total de Ventas", palette = "viridis", ax = ax)
 
-    ax.set_ylabel("Ventas $")
-    ax.set_title("Tendencia de las ventas diarias")
-    ax.grid(True, alpha=0.3)
+        # Añadimos barras verticales para distinguir entre semanas
+        # Obtenemos las fechas únicas del DataFrame agrupado por día
+        fechas_unicas = df_ventas['Date'].unique()
 
-    st.pyplot(fig)
+        # Iteramos sobre las fechas y dibujamos una línea vertical para el inicio de cada semana
+        for fecha in fechas_unicas:
+            # Convertir la fecha a objeto datetime de Python si es necesario (unique() puede devolver numpy.datetime64)
+            fecha_dt = pd.to_datetime(fecha)
+            # Comprobamos si es el inicio de la semana (lunes)
+            if fecha_dt.weekday() == 0: # 0 representa el lunes
+                ax.axvline(fecha, color = 'gray', linestyle = "--", alpha = 0.5)
+
+        # Personalizamos el gráfico
+        ax.set_xlabel("Fecha")
+        ax.set_ylabel("Monto total de ventas diario ($)")
+        ax.set_title("Evolución del total de ventas diarias")
+        ax.grid(True, alpha=0.3)
+        plt.xticks(rotation = 45, ha= 'right')
+        st.pyplot(fig)
 
 elif grafico_opcion == "Ingresos por Línea de Producto":
     # Agrupar datos por línea de producto
     df_ventas_br = df_filtrado.groupby("Product line")["Total"].sum().reset_index()
 
-    # Crear diccionario de letras
-    etiquetas_letras = {nombre: chr(65 + i) for i, nombre in enumerate(df_ventas_br["Product line"])}
-    df_ventas_br["Etiqueta"] = df_ventas_br["Product line"].map(etiquetas_letras)
-
     fig, ax = plt.subplots(figsize=(8, 4))
 
     # Graficar
-    sns.barplot(data=df_ventas_br, x="Etiqueta", y="Total", ax=ax, color="#4c72b0", label="Ingreso Total")
+    sns.barplot(data=df_ventas_br, x="Product line", y="Total", ax=ax, palette="viridis", dodge="auto")
 
     # Configuración del gráfico
-    ax.legend(title="Leyenda")
-    ax.set_xlabel("Línea de Producto (codificada)")
+    ax.set_xlabel("Línea de Producto")
     ax.set_ylabel("Total de Ingresos")
     ax.set_title("Ingresos por Línea de Producto")
+    plt.xticks(rotation=45, ha='right')
 
     st.pyplot(fig)
 
-    # Mostrar tabla de equivalencias (sin nombres de producto, solo letras)
-    st.write("**Equivalencias de Línea de Producto:**")
-    st.table(pd.DataFrame.from_dict(etiquetas_letras, orient='index', columns=["Letra"]).reset_index().rename(columns={"index": "Product Line"}))
-
 elif grafico_opcion == "Distribución de la Calificación de Clientes":
     st.subheader("Distribución de la Calificación de Clientes")
-    st.write("*Este histograma muestra cómo se distribuyen las calificaciones otorgadas por los clientes.*")
+    st.write("*Este histograma muestra como se distribuyen las calificaciones otorgadas por los clientes.*")
 
     fig, ax = plt.subplots(figsize=(6, 3))
 
-    sns.histplot(
-        data=df_filtrado,
-        x="Rating",
-        bins=10,
-        kde=True,
-        color="#2ca02c",
-        edgecolor="black",
-        ax=ax
-    )
+    sns.histplot(data=df_filtrado, x="Rating", bins=10, kde=True, palette="viridis",
+                 edgecolor="black", ax=ax)
 
     ax.set_xlabel("Calificación")
     ax.set_ylabel("Frecuencia")
@@ -152,6 +155,111 @@ elif grafico_opcion == "Distribución de la Calificación de Clientes":
     ax.grid(True, alpha=0.3)
 
     st.pyplot(fig)
+
+elif grafico_opcion == "Comparación del Gasto por Tipo de Cliente":
+    st.subheader("Comparación del Gasto por Tipo de Cliente")
+    st.write(
+        "Se muestra un gráfico circular y un gráfico de barras para indicar la distribución y el total de ventas, respectivamente, según las líneas de producto y el Tipo de Cliente."
+    )
+
+    c1_f2, c2_f2 = st.columns(2)
+
+    with c2_f2:
+      if lineas_seleccionadas:
+          df_linea_producto = df_filtrado.groupby(['Product line', 'Customer type'])['Total'].sum().reset_index(name='Total de Ventas')
+
+          fig, ax = plt.subplots(figsize=(8, 5))
+
+          sns.barplot(data = df_linea_producto, x = "Total de Ventas", y = "Product line",
+                      hue = "Customer type", palette = "viridis", ax = ax)
+
+          #Personalizamos el gráfico
+          ax.set_xlabel("Línea de Producto", fontsize = 14)
+          ax.set_ylabel("Monto total de ventas", fontsize = 14)
+          ax.set_title("Total de ventas por línea de producto", fontsize = 18)
+          ax.grid(True, alpha=0.3)
+          plt.xticks(rotation = 45, ha= 'right')
+          plt.tight_layout()
+          ax.legend(title="Tipo de cliente", loc="upper right")
+
+          st.pyplot(fig)
+
+      else:
+        st.info("Selecciona al menos una categoría de compra para ver el gráfico correctamente")
+
+    with c1_f2:
+      if lineas_seleccionadas:
+        df_linea_producto = df_filtrado.groupby('Customer type')['Total'].sum().reset_index(name='Total de Ventas')
+
+        Ventas = df_linea_producto['Total de Ventas']
+        labels = df_linea_producto['Customer type']
+
+        fig, ax = plt.subplots(figsize=(8, 5))
+
+        ax.pie(
+            Ventas,
+            labels = labels,
+            autopct = '%1.1f%%',
+            startangle = 90,
+            colors = sns.color_palette('viridis', len(labels))
+        )
+
+        ax.axis('equal')
+
+        ax.set_title('Proporción de ventas por tipo de cliente')
+
+        st.pyplot(fig)
+
+elif grafico_opcion == "Relación entre Costo y Ganancia Bruta":
+    st.subheader("Relación entre Costo y Ganancia Bruta")
+    st.write("Se utiliza un gráfico de dispersión para visualizar la relación entre el costo y la ganancia bruta. Se aprecia una correlación directa.")
+    if lineas_seleccionadas:
+      fig, ax = plt.subplots(figsize=(8, 5))
+
+      sns.scatterplot(data = df_filtrado, x = "cogs", y = "gross income",
+                      palette = "viridis",ax = ax)
+
+      #Personalizamos el gráfico
+      ax.set_xlabel("Costo de bienes vendidos", fontsize = 14)
+      ax.set_ylabel("Ingreso bruto", fontsize = 14)
+      ax.set_title("Relación entre costo de bienes vendidos e ingreso bruto", fontsize = 18)
+
+      st.pyplot(fig)
+
+elif grafico_opcion == "Métodos de Pago Preferidos":
+    st.subheader("Métodos de Pago Preferidos")
+    st.write("Se muestra un gráfico combinado cuyo eje izquierdo representa la cantidad de compras con cada medio de pago, mientras que el eje derecho representa el monto del total de compras realizadas.")
+
+    if lineas_seleccionadas:
+      df_metodo_pago = df_filtrado.groupby('Payment').agg(
+          Frecuencia = ('Payment', 'count'),
+          Monto_Total = ('Total', 'sum')
+      ).reset_index()
+
+      fig, ax1 = plt.subplots(figsize=(8, 5))
+
+      sns.barplot(data = df_metodo_pago, x = "Payment", y = "Frecuencia",
+          palette = "viridis", ax = ax1)
+
+      #Personalizamos el primer eje
+      ax1.set_xlabel("Método de pago", fontsize = 14)
+      ax1.set_ylabel("Frecuencia", fontsize = 14)
+
+      #Creamos el segundo eje y el gráfico
+      ax2 = ax1.twinx()
+
+      sns.lineplot(data = df_metodo_pago, x = "Payment", y = "Monto_Total",
+                   color = "blue", alpha = 0.6, marker = 'o', ax = ax2)
+
+      #Personalizamos el segundo eje
+      ax2.set_ylabel("Monto total de ventas", fontsize = 14)
+      ax2.tick_params (axis='y', labelcolor="blue")
+
+      plt.title("Frecuencia y monto total de ventas según método de pago", fontsize = 18)
+      plt.tight_layout()
+
+      st.pyplot(fig)
+      plt.close(fig)
 
 elif grafico_opcion == "Análisis de Correlación Numérica":
     st.subheader("Análisis de Correlación Numérica")
@@ -204,4 +312,31 @@ elif grafico_opcion == "Composición del Ingreso Bruto por Sucursal y Línea de 
 
     st.write("### Porcentajes de Ingreso Bruto por Línea de Producto dentro de cada Sucursal (%)")
     st.dataframe(df_porcentajes)
+
+elif grafico_opcion == "Relación entre Total Gastado, Cantidad Comprada y Calificación del Cliente (3D)":
+    st.subheader("Relación entre Total Gastado, Cantidad Comprada y Calificación del Cliente")
+
+    if lineas_seleccionadas:
+      fig = px.scatter_3d(
+          df_filtrado,
+          x = "Total",
+          y = "Quantity",
+          z = "Rating",
+          color="Product line",
+          hover_data = ["Product line", "Payment"],
+          title="Relación entre Total Gastado, Cantidad Comprada y Calificación del Cliente"
+      )
+
+      #Personalizamos el gráfico
+      fig.update_layout(scene=dict(
+          xaxis_title='Total',
+          yaxis_title='Quantity',
+          zaxis_title='Rating'
+          ))
+
+      st.plotly_chart(fig)
+
+# Pie de página simple
+st.markdown("---")
+st.caption("Dashboard Análisis de Ventas Grupo 27 | Fecha: 21 de mayo 2025")
 
